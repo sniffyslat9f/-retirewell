@@ -368,7 +368,7 @@ export function generateProjection(
         year: new Date().getFullYear() + year,
         age1, age2,
         portfolioValue: 0, withdrawals: 0,
-        taxPaid: 0, incomeTax: 0, cgt: 0, bedAndIsaCgt: 0,
+        taxPaid: 0, incomeTax: 0, cgt: 0,
         statePensionIncome: 0, otherIncome: 0,
         netIncome: 0, spending: 0,
         isaBalance: 0, sippBalance: 0, generalBalance: 0, cashBalance: 0,
