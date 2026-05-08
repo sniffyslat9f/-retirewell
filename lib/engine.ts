@@ -144,7 +144,7 @@ function calculatePersonTax(
   pensionWithdrawal: number,
   giaWithdrawal: number,
   giaCostBasisWithdrawn: number,
-): { incomeTax: number; cgt: number; total: number; portfolioTax: number } {
+): { incomeTax: number; cgt: number; total: number; portfolioTax: number; taxableIncome: number } {
   let taxableIncome = 0
 
   // SIPP/pension withdrawals — taxed as income
