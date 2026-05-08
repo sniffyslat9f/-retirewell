@@ -5,7 +5,7 @@ import type { YearProjection } from "@/lib/types"
 import { formatCurrency } from "@/lib/engine"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Table, Flag, ChevronDown, ChevronUp } from "lucide-react"
+import { Table, Flag } from "lucide-react"
 
 interface ProjectionTableProps {
   projection: YearProjection[]
@@ -13,24 +13,20 @@ interface ProjectionTableProps {
 
 export function ProjectionTable({ projection }: ProjectionTableProps) {
   const [showAll, setShowAll] = useState(false)
-  const [collapsed, setCollapsed] = useState(false)
   const visibleRows = showAll ? projection.slice(0, 40) : projection.slice(0, 15)
 
   return (
     <Card>
-      <CardHeader className="cursor-pointer select-none" onClick={() => setCollapsed(v => !v)}>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2.5 text-base">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-slate-700 shadow-sm">
-              <Table className="size-5 text-white" />
-            </div>
-            Year-by-Year Projection
-          </CardTitle>
-          {collapsed ? <ChevronDown className="size-4 text-muted-foreground" /> : <ChevronUp className="size-4 text-muted-foreground" />}
-        </div>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2.5 text-base">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-slate-700 shadow-sm">
+            <Table className="size-5 text-white" />
+          </div>
+          Year-by-Year Projection
+        </CardTitle>
         <CardDescription>Detailed annual breakdown in today's £ — all figures are inflation-adjusted</CardDescription>
       </CardHeader>
-      {!collapsed && <CardContent>
+      <CardContent>
         <div className="overflow-x-auto -mx-6 px-6">
           <table className="w-full text-xs" role="table">
             <thead>
@@ -90,7 +86,7 @@ export function ProjectionTable({ projection }: ProjectionTableProps) {
             </Button>
           </div>
         )}
-      </CardContent>}
+      </CardContent>
     </Card>
   )
 }

@@ -12,7 +12,7 @@ import {
   AreaChart, Area, CartesianGrid, Line, LineChart, ComposedChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis, Legend, ReferenceLine,
 } from "recharts"
-import { Layers, History, TrendingUp, Percent, ChevronDown, ChevronUp } from "lucide-react"
+import { Layers, History, TrendingUp, Percent } from "lucide-react"
 
 // Standard iOS-style icon badge — size-9 square rounded-xl, used across all components
 function IOS({ color, children }: { color: string; children: React.ReactNode }) {
@@ -111,10 +111,6 @@ function fmt(v: number): string {
 
 export function ProjectionCharts({ projection, monteCarlo, config, scenario }: ProjectionChartsProps) {
   const [historicalStartYear, setHistoricalStartYear] = useState<number>(2000)
-  const [showAccounts, setShowAccounts] = useState(true)
-  const [showHistorical, setShowHistorical] = useState(true)
-  const [showMonteCarlo, setShowMonteCarlo] = useState(true)
-  const [showWithdrawal, setShowWithdrawal] = useState(true)
 
   // Account breakdown — absolute £ values, log scale, zeros floored at 1
   const accountBreakdownData = useMemo(() => projection.slice(0, 35).map((p) => ({
@@ -182,17 +178,14 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
 
       {/* G — Account Breakdown (log scale £) */}
       <Card>
-        <CardHeader className="cursor-pointer select-none" onClick={() => setShowAccounts(v => !v)}>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2.5 text-base">
-              <IOS color="bg-teal-500"><Layers className="size-5 text-white" /></IOS>
-              Account Breakdown Over Time
-            </CardTitle>
-            {showAccounts ? <ChevronUp className="size-4 text-muted-foreground" /> : <ChevronDown className="size-4 text-muted-foreground" />}
-          </div>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2.5 text-base">
+            <IOS color="bg-teal-500"><Layers className="size-5 text-white" /></IOS>
+            Account Breakdown Over Time
+          </CardTitle>
           <CardDescription>Portfolio composition by account type · Today's £</CardDescription>
         </CardHeader>
-        {showAccounts && <CardContent>
+        <CardContent>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={accountBreakdownData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -208,14 +201,14 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </CardContent>}
+        </CardContent>
       </Card>
 
       {/* H — Historical Sequence (log scale) */}
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
-            <div className="cursor-pointer select-none flex-1" onClick={() => setShowHistorical(v => !v)}>
+            <div>
               <CardTitle className="flex items-center gap-2.5 text-base">
                 <IOS color="bg-rose-500"><History className="size-5 text-white" /></IOS>
                 Historical Sequence Testing
@@ -224,7 +217,6 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
                 How would your portfolio have performed retiring in a specific year? Uses actual S&P 500 real returns · Today's £
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
             <Select value={historicalStartYear.toString()} onValueChange={(v) => setHistoricalStartYear(Number(v))}>
               <SelectTrigger className="w-[220px] shrink-0 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -235,24 +227,18 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
                 ))}
               </SelectContent>
             </Select>
-            <button onClick={() => setShowHistorical(v => !v)} className="text-muted-foreground hover:text-foreground">
-              {showHistorical ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-            </button>
-            </div>
           </div>
-          {showHistorical && (
-            historicalFailed ? (
-              <div className="mt-2 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive font-medium">
-                ⚠️ Portfolio exhausted in year {failureYear + 1} ({historicalStartYear + failureYear}) under this sequence
-              </div>
-            ) : (
-              <div className="mt-2 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700 font-medium">
-                ✅ Portfolio survives the full 35 years under this historical sequence
-              </div>
-            )
+          {historicalFailed ? (
+            <div className="mt-2 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive font-medium">
+              ⚠️ Portfolio exhausted in year {failureYear + 1} ({historicalStartYear + failureYear}) under this sequence
+            </div>
+          ) : (
+            <div className="mt-2 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700 font-medium">
+              ✅ Portfolio survives the full 35 years under this historical sequence
+            </div>
           )}
         </CardHeader>
-        {showHistorical && <CardContent>
+        <CardContent>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={historicalData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -266,8 +252,8 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-        </CardContent>}
-        {showHistorical && <CardContent className="pt-0">
+        </CardContent>
+        <CardContent className="pt-0">
           <div className="border-t pt-4">
             <p className="text-xs font-medium text-muted-foreground mb-3">
               Year-by-Year Projection — {historicalStartYear} Historical Sequence · Today's £ (inflation-adjusted)
@@ -314,22 +300,19 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
               </table>
             </div>
           </div>
-        </CardContent>}
+        </CardContent>
       </Card>
 
       {/* Monte Carlo confidence bands (log scale) */}
       <Card>
-        <CardHeader className="cursor-pointer select-none" onClick={() => setShowMonteCarlo(v => !v)}>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2.5 text-base">
-              <IOS color="bg-violet-500"><TrendingUp className="size-5 text-white" /></IOS>
-              Portfolio Projection — Confidence Bands
-            </CardTitle>
-            {showMonteCarlo ? <ChevronUp className="size-4 text-muted-foreground" /> : <ChevronDown className="size-4 text-muted-foreground" />}
-          </div>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2.5 text-base">
+            <IOS color="bg-violet-500"><TrendingUp className="size-5 text-white" /></IOS>
+            Portfolio Projection — Confidence Bands
+          </CardTitle>
           <CardDescription>800 Monte Carlo scenarios showing range of outcomes · Today's £</CardDescription>
         </CardHeader>
-        {showMonteCarlo && <CardContent>
+        <CardContent>
           <div className="h-[340px]">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={monteCarloData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -346,22 +329,19 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-        </CardContent>}
+        </CardContent>
       </Card>
 
       {/* Withdrawal Rate Over Time */}
       <Card>
-        <CardHeader className="cursor-pointer select-none" onClick={() => setShowWithdrawal(v => !v)}>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2.5 text-base">
-              <IOS color="bg-orange-500"><Percent className="size-5 text-white" /></IOS>
-              Withdrawal Rate Over Time
-            </CardTitle>
-            {showWithdrawal ? <ChevronUp className="size-4 text-muted-foreground" /> : <ChevronDown className="size-4 text-muted-foreground" />}
-          </div>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2.5 text-base">
+            <IOS color="bg-orange-500"><Percent className="size-5 text-white" /></IOS>
+            Withdrawal Rate Over Time
+          </CardTitle>
           <CardDescription>Portfolio withdrawal rate each year — how much of your portfolio you draw down annually</CardDescription>
         </CardHeader>
-        {showWithdrawal && <CardContent>
+        <CardContent>
           <div className="h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={withdrawalRateData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -383,7 +363,7 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </CardContent>}
+        </CardContent>
       </Card>
 
     </div>
