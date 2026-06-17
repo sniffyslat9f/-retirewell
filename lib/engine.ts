@@ -1,4 +1,4 @@
-import type { PersonConfig, HouseholdConfig, YearProjection, HealthScore, MonteCarloResult, ScenarioConfig, AccountType, WithdrawalConfig } from "./types"
+import type { PersonConfig, HouseholdConfig, YearProjection, HealthScore, MonteCarloResult, ScenarioConfig, AccountType, WithdrawalConfig, OtherIncome } from "./types"
 
 // UK 2024/25 tax bands (England/Wales/NI)
 const UK_PERSONAL_ALLOWANCE = 12570
@@ -260,6 +260,16 @@ function calculateTargetSpending(
   }
 }
 
+// Other income expressed in today's money for a given projection year.
+// Income flagged as NOT rising with inflation (e.g. a level annuity) is deflated
+// each year so its real value erodes; everything else is held flat in real terms.
+function deflateOtherIncome(incomes: OtherIncome[], year: number, inflationRate: number): OtherIncome[] {
+  const deflator = Math.pow(1 / (1 + inflationRate), year)
+  return incomes.map(oi =>
+    oi.increasesWithInflation === false ? { ...oi, annualAmount: oi.annualAmount * deflator } : oi
+  )
+}
+
 function getPersonTotalIncome(person: PersonConfig): number {
   let income = 0
   if (person.receivingStatePension || person.age >= person.statePensionAge) {
@@ -353,7 +363,10 @@ export function generateProjection(
   // Track previous year GIA balances for milestone detection
   let prevP1Gia = config.person1.generalInvestments
   let prevP2Gia = config.person2.generalInvestments
-  let prevP1Sp = 0, prevP2Sp = 0
+  // Seed with whether each person is ALREADY drawing state pension in year 0,
+  // so the "state pension starts" milestone only fires when it genuinely begins.
+  let prevP1Sp = (config.person1.receivingStatePension || config.person1.age >= config.person1.statePensionAge) ? config.person1.statePensionAmount : 0
+  let prevP2Sp = (config.person2.receivingStatePension || config.person2.age >= config.person2.statePensionAge) ? config.person2.statePensionAmount : 0
 
   for (let year = 0; year < maxYears; year++) {
     const age1 = config.person1.age + year
@@ -364,13 +377,22 @@ export function generateProjection(
       p2Balances.cash + p2Balances.isa + p2Balances.sipp + p2Balances.general
 
     if (totalPortfolio <= 0 && year > 0) {
+      // Portfolio is exhausted, but the couple still receive state pension and any
+      // other income. Show that (net of tax) rather than reporting zero income.
+      const dpP1Sp = (config.person1.receivingStatePension || age1 >= config.person1.statePensionAge) ? p1StatePensionReal : 0
+      const dpP2Sp = (config.person2.receivingStatePension || age2 >= config.person2.statePensionAge) ? p2StatePensionReal : 0
+      const dpOther1 = deflateOtherIncome(config.person1.otherIncome, year, inflationRate).reduce((s, oi) => s + oi.annualAmount, 0)
+      const dpOther2 = deflateOtherIncome(config.person2.otherIncome, year, inflationRate).reduce((s, oi) => s + oi.annualAmount, 0)
+      const dpTax1 = calculateUKIncomeTax(dpP1Sp + dpOther1, config.person1.useScottishTax)
+      const dpTax2 = calculateUKIncomeTax(dpP2Sp + dpOther2, config.person2.useScottishTax)
+      const dpNet = Math.max(0, dpP1Sp + dpP2Sp + dpOther1 + dpOther2 - dpTax1 - dpTax2)
       projections.push({
         year: new Date().getFullYear() + year,
         age1, age2,
         portfolioValue: 0, withdrawals: 0,
-        taxPaid: 0, incomeTax: 0, cgt: 0,
-        statePensionIncome: 0, otherIncome: 0,
-        netIncome: 0, spending: 0,
+        taxPaid: Math.round(dpTax1 + dpTax2), incomeTax: Math.round(dpTax1 + dpTax2), cgt: 0,
+        statePensionIncome: Math.round(dpP1Sp + dpP2Sp), otherIncome: Math.round(dpOther1 + dpOther2),
+        netIncome: Math.round(dpNet), spending: Math.round(dpNet),
         isaBalance: 0, sippBalance: 0, generalBalance: 0, cashBalance: 0,
       })
       continue
@@ -397,9 +419,17 @@ export function generateProjection(
         + (age2 >= delayedAge2 ? p2StatePensionReal : 0)
     }
 
-    const p1Other = getPersonTotalIncome({ ...config.person1, age: age1, statePensionAmount: 0, receivingStatePension: false, otherIncome: config.person1.otherIncome })
-    const p2Other = getPersonTotalIncome({ ...config.person2, age: age2, statePensionAmount: 0, receivingStatePension: false, otherIncome: config.person2.otherIncome })
+    // Other income in today's money for this year (level income erodes, see deflateOtherIncome)
+    const p1OtherIncomeReal = deflateOtherIncome(config.person1.otherIncome, year, inflationRate)
+    const p2OtherIncomeReal = deflateOtherIncome(config.person2.otherIncome, year, inflationRate)
+    const p1Other = p1OtherIncomeReal.reduce((s, oi) => s + oi.annualAmount, 0)
+    const p2Other = p2OtherIncomeReal.reduce((s, oi) => s + oi.annualAmount, 0)
     const totalOtherIncome = p1Other + p2Other
+
+    // Person objects used for tax: use the current real state pension (after triple-lock
+    // growth) and the inflation-adjusted other income, so tax tracks the income actually received.
+    const p1ForTax = { ...config.person1, age: age1, statePensionAmount: p1StatePensionReal, otherIncome: p1OtherIncomeReal }
+    const p2ForTax = { ...config.person2, age: age2, statePensionAmount: p2StatePensionReal, otherIncome: p2OtherIncomeReal }
 
     let careCost = 0
     if (scenario?.careCostEnabled && scenario.careCostAge > 0) {
@@ -479,8 +509,8 @@ export function generateProjection(
       const p2CostBasisRatio = p2Balances.general > 0 ? Math.min(1, p2GiaCostBasis / p2Balances.general) : 0
       p2CostBasisWithdrawn = p2Result.giaWithdrawn * p2CostBasisRatio
 
-      p1TaxResult = calculatePersonTax({ ...config.person1, age: age1 }, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn)
-      p2TaxResult = calculatePersonTax({ ...config.person2, age: age2 }, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn)
+      p1TaxResult = calculatePersonTax(p1ForTax, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn)
+      p2TaxResult = calculatePersonTax(p2ForTax, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn)
 
       // Gross up for ALL portfolio taxes: income tax on SIPP + CGT on GIA
       // portfolioTax = income tax attributable to portfolio + CGT on GIA withdrawals
@@ -498,8 +528,8 @@ export function generateProjection(
     const p2CostBasisRatioFinal = p2Balances.general > 0 ? Math.min(1, p2GiaCostBasis / p2Balances.general) : 0
     p2CostBasisWithdrawn = p2Result.giaWithdrawn * p2CostBasisRatioFinal
 
-    p1TaxResult = calculatePersonTax({ ...config.person1, age: age1 }, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn)
-    p2TaxResult = calculatePersonTax({ ...config.person2, age: age2 }, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn)
+    p1TaxResult = calculatePersonTax(p1ForTax, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn)
+    p2TaxResult = calculatePersonTax(p2ForTax, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn)
 
     const portfolioNeeded = p1GrossNeeded + p2GrossNeeded
 
@@ -610,8 +640,12 @@ export function generateProjection(
       general: p2GeneralAfterBi * p2GiaGrowth,
     }
 
-    p1GiaCostBasis *= p1GiaGrowth
-    p2GiaCostBasis *= p2GiaGrowth
+    // Cost basis is a fixed nominal amount (what was originally paid) — it does NOT
+    // grow with the market. Because all balances are held in today's money, deflate the
+    // basis by inflation each year so the taxable gain (and CGT) grows as the pot grows.
+    const basisDeflator = 1 / (1 + inflationRate)
+    p1GiaCostBasis *= basisDeflator
+    p2GiaCostBasis *= basisDeflator
 
     const totalBedIsaCgt = p1BedIsaCgt + p2BedIsaCgt
 
@@ -656,109 +690,63 @@ export function generateProjection(
   return projections
 }
 
+// Portfolio-wide weighted stock %, used to set the mean/volatility of random returns.
+function weightedStocksPct(config: HouseholdConfig): number {
+  const totalInvested =
+    config.person1.isaBalance + config.person1.sippBalance + config.person1.generalInvestments +
+    config.person2.isaBalance + config.person2.sippBalance + config.person2.generalInvestments
+  if (totalInvested <= 0) return 70
+  return (
+    config.person1.isaBalance * config.person1.isaAllocation.stocksPct +
+    config.person1.sippBalance * config.person1.sippAllocation.stocksPct +
+    config.person1.generalInvestments * config.person1.generalAllocation.stocksPct +
+    config.person2.isaBalance * config.person2.isaAllocation.stocksPct +
+    config.person2.sippBalance * config.person2.sippAllocation.stocksPct +
+    config.person2.generalInvestments * config.person2.generalAllocation.stocksPct
+  ) / totalInvested
+}
+
+// Run `simulations` Monte Carlo paths through the SAME full projection engine used by the
+// year-by-year table — so tax, withdrawal strategy, spending phases, Bed & ISA and net-of-tax
+// income are all included. Each path feeds a fresh sequence of random real returns into the
+// engine. Returns the end-of-year portfolio value for every simulation and year.
+function simulatePaths(config: HouseholdConfig, simulations: number, scenario?: ScenarioConfig): number[][] {
+  const maxYears = config.projectionYears ?? 40
+  const stocks = weightedStocksPct(config)
+  // Respect the user's own return assumptions (was previously ignored here).
+  const mean = blendedReturn(stocks, config.stocksReturn ?? STOCK_RETURN, config.bondsReturn ?? BOND_RETURN)
+  const stdDev = blendedVolatility(stocks)
+  const realMean = mean - (config.inflationRate ?? 0.025)
+
+  const results: number[][] = []
+  for (let sim = 0; sim < simulations; sim++) {
+    const returns = new Array<number>(maxYears)
+    for (let y = 0; y < maxYears; y++) {
+      const u1 = Math.random(), u2 = Math.random()
+      const z = Math.sqrt(-2 * Math.log(Math.max(u1, 1e-10))) * Math.cos(2 * Math.PI * u2)
+      returns[y] = realMean + stdDev * z
+    }
+    const proj = generateProjection(config, undefined, config.inflationRate, scenario, returns)
+    results.push(proj.map(p => p.portfolioValue))
+  }
+  return results
+}
+
+// Probability (0-100) the portfolio is still alive at a given year index, across `simulations` paths.
+function survivalProbabilityAtYear(config: HouseholdConfig, yearIndex: number, simulations: number, scenario?: ScenarioConfig): number {
+  if (yearIndex < 0) return 100
+  const paths = simulatePaths(config, simulations, scenario)
+  const alive = paths.filter(r => (r[yearIndex] ?? 0) > 0).length
+  return Math.round((alive / simulations) * 100)
+}
+
 export function runMonteCarlo(
   config: HouseholdConfig,
   simulations: number = 1000,
   scenario?: ScenarioConfig
 ): MonteCarloResult {
   const maxYears = config.projectionYears ?? 40
-  const results: number[][] = []
-
-  // Calculate weighted average allocation across all invested assets
-  const p1Invested = config.person1.isaBalance + config.person1.sippBalance + config.person1.generalInvestments
-  const p2Invested = config.person2.isaBalance + config.person2.sippBalance + config.person2.generalInvestments
-  const totalInvested = p1Invested + p2Invested || 1
-
-  const weightedStocksPct = totalInvested > 0 ? (
-    (config.person1.isaBalance * config.person1.isaAllocation.stocksPct +
-     config.person1.sippBalance * config.person1.sippAllocation.stocksPct +
-     config.person1.generalInvestments * config.person1.generalAllocation.stocksPct +
-     config.person2.isaBalance * config.person2.isaAllocation.stocksPct +
-     config.person2.sippBalance * config.person2.sippAllocation.stocksPct +
-     config.person2.generalInvestments * config.person2.generalAllocation.stocksPct) / totalInvested
-  ) : 70
-
-  const mean = blendedReturn(weightedStocksPct)
-  const stdDev = blendedVolatility(weightedStocksPct)
-
-  const wc = config.withdrawalConfig ?? { method: "constant", percentOfPortfolio: 4, floorPct: 2.5, ceilingPct: 5, guardrailLower: 20, guardrailUpper: 20 }
-
-  for (let sim = 0; sim < simulations; sim++) {
-    const yearlyValues: number[] = []
-    let totalPortfolio =
-      config.person1.isaBalance + config.person1.sippBalance + config.person1.generalInvestments + config.person1.cashSavings +
-      config.person2.isaBalance + config.person2.sippBalance + config.person2.generalInvestments + config.person2.cashSavings
-
-    if (scenario?.marketCrash) {
-      totalPortfolio *= (1 - (scenario.marketCrashPercent / 100))
-    }
-
-    const baseSpending = config.annualSpending + (scenario?.extraSpending || 0)
-    const initialPortfolio = totalPortfolio
-    const initialWithdrawalRate = totalPortfolio > 0 ? baseSpending / totalPortfolio : 0.04
-    let prevSpending = baseSpending
-
-    for (let year = 0; year < maxYears; year++) {
-      const age1 = config.person1.age + year
-      const age2 = config.person2.age + year
-
-      const realMean = mean - (config.inflationRate ?? 0.025)
-      const u1 = Math.random()
-      const u2 = Math.random()
-      const z = Math.sqrt(-2 * Math.log(Math.max(u1, 1e-10))) * Math.cos(2 * Math.PI * u2)
-      const yearReturn = realMean + stdDev * z
-
-      // Income sources
-      let income = 0
-      if (config.person1.receivingStatePension || age1 >= config.person1.statePensionAge) {
-        income += config.person1.statePensionAmount
-      }
-      if (config.person2.receivingStatePension || age2 >= config.person2.statePensionAge) {
-        income += config.person2.statePensionAmount
-      }
-      for (const oi of [...config.person1.otherIncome, ...config.person2.otherIncome]) {
-        income += oi.annualAmount
-      }
-
-      if (scenario?.delayStatePension) {
-        income = 0
-        const da1 = config.person1.statePensionAge + (scenario.delayYears || 0)
-        const da2 = config.person2.statePensionAge + (scenario.delayYears || 0)
-        if (age1 >= da1) income += config.person1.statePensionAmount
-        if (age2 >= da2) income += config.person2.statePensionAmount
-        for (const oi of [...config.person1.otherIncome, ...config.person2.otherIncome]) {
-          income += oi.annualAmount
-        }
-      }
-
-      // Apply withdrawal method to determine gross spending target
-      let currentSpending = calculateTargetSpending(
-        wc, baseSpending, totalPortfolio, initialPortfolio, initialWithdrawalRate, prevSpending
-      )
-      prevSpending = currentSpending
-
-      if (scenario?.careCostEnabled && scenario.careCostAge > 0) {
-        if (age1 >= scenario.careCostAge || age2 >= scenario.careCostAge) {
-          currentSpending += scenario.annualCareCost
-        }
-      }
-
-      if (scenario?.reduceSpending) {
-        const startAge = scenario.reduceSpendingFromAge ?? 0
-        const endAge = startAge + (scenario.reduceSpendingForYears ?? 0)
-        const olderAge = Math.max(age1, age2)
-        if (olderAge >= startAge && olderAge < endAge) {
-          currentSpending = scenario.reducedSpendingAmount ?? currentSpending
-        }
-      }
-
-      const portfolioNeeded = Math.max(0, currentSpending - income)
-      totalPortfolio = Math.max(0, (totalPortfolio - portfolioNeeded) * (1 + yearReturn))
-      yearlyValues.push(totalPortfolio)
-    }
-
-    results.push(yearlyValues)
-  }
+  const results = simulatePaths(config, simulations, scenario)
 
   // Calculate percentiles
   const percentiles = (pct: number): number[] => {
@@ -791,7 +779,7 @@ export function runMonteCarlo(
 }
 
 export function calculateHealthScore(config: HouseholdConfig, scenario?: ScenarioConfig): HealthScore {
-  const projection = generateProjection(config, 0.05, 0.025, scenario)
+  const projection = generateProjection(config, undefined, config.inflationRate, scenario)
 
   const depletedYear = projection.findIndex(p => p.portfolioValue <= 0)
   const runwayYears = depletedYear === -1 ? 50 : depletedYear
@@ -820,16 +808,19 @@ export function calculateHealthScore(config: HouseholdConfig, scenario?: Scenari
     ? ((config.annualSpending - getPersonTotalIncome({ ...config.person1, age: config.person1.age }) - getPersonTotalIncome({ ...config.person2, age: config.person2.age })) / totalPortfolio) * 100
     : 0
 
-  // Max safe spending: binary search for spending level that keeps portfolio alive to age 95
+  // Max safe spending: highest flat spending level that keeps the portfolio alive to age 95
+  // in at least SAFE_SURVIVAL_TARGET% of Monte Carlo runs. Using the risk simulation (not a
+  // single average projection) means "safe" reflects sequence-of-returns risk, not a coin flip.
+  const SAFE_SURVIVAL_TARGET = 90
   let maxSafeSpending = config.annualSpending
-  if (totalPortfolio > 0) {
-    let lo = config.annualSpending, hi = totalPortfolio * 0.15
-    for (let i = 0; i < 20; i++) {
+  if (totalPortfolio > 0 && yearsTo95 > 0) {
+    const targetIdx = yearsTo95 - 1
+    let lo = 0, hi = totalPortfolio * 0.15
+    for (let i = 0; i < 16; i++) {
       const mid = (lo + hi) / 2
-      const testConfig = { ...config, annualSpending: mid }
-      const testProjection = generateProjection(testConfig, 0.05, config.inflationRate)
-      const survivesTo95 = testProjection[yearsTo95 - 1]?.portfolioValue > 0
-      if (survivesTo95) lo = mid
+      const testConfig = { ...config, annualSpending: mid, spendingPhases: [] }
+      const survival = survivalProbabilityAtYear(testConfig, targetIdx, 250)
+      if (survival >= SAFE_SURVIVAL_TARGET) lo = mid
       else hi = mid
     }
     maxSafeSpending = Math.round(lo / 100) * 100

@@ -73,7 +73,7 @@ function PersonForm({
 
   const addOtherIncome = () => {
     update({
-      otherIncome: [...person.otherIncome, { label: "", annualAmount: 0, type: "other" }],
+      otherIncome: [...person.otherIncome, { label: "", annualAmount: 0, type: "other", increasesWithInflation: true }],
     })
   }
 
@@ -372,6 +372,16 @@ function PersonForm({
                 <Label className="text-xs text-muted-foreground">Annual amount</Label>
                 <CurrencyInput value={income.annualAmount} onChange={(v) => updateOtherIncome(idx, { annualAmount: v })} />
               </div>
+            </div>
+            <div className="flex items-center justify-between rounded-md bg-background/60 px-2 py-1.5">
+              <div className="flex flex-col">
+                <Label className="text-xs">Rises with inflation</Label>
+                <span className="text-[10px] text-muted-foreground">Turn off for a level annuity or fixed pension (its value erodes over time)</span>
+              </div>
+              <Switch
+                checked={income.increasesWithInflation !== false}
+                onCheckedChange={(checked) => updateOtherIncome(idx, { increasesWithInflation: checked })}
+              />
             </div>
           </div>
         ))}

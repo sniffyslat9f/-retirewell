@@ -6,6 +6,9 @@ export interface OtherIncome {
   label: string
   annualAmount: number
   type: "rental" | "parttime" | "annuity" | "db_pension" | "other"
+  // If false, this income stays level in cash terms (e.g. a level annuity) and so
+  // erodes in today's-money terms each year. If true/undefined, it rises with inflation.
+  increasesWithInflation?: boolean
 }
 
 export interface BedAndIsaConfig {
