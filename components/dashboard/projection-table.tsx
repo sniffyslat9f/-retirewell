@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/engine"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, Flag } from "lucide-react"
+import { CollapseToggle } from "./collapse-toggle"
 
 interface ProjectionTableProps {
   projection: YearProjection[]
@@ -13,19 +14,26 @@ interface ProjectionTableProps {
 
 export function ProjectionTable({ projection }: ProjectionTableProps) {
   const [showAll, setShowAll] = useState(false)
+  const [open, setOpen] = useState(true)
   const visibleRows = showAll ? projection : projection.slice(0, 15)
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2.5 text-base">
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-slate-700 shadow-sm">
-            <Table className="size-5 text-white" />
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2.5 text-base">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-slate-700 shadow-sm">
+                <Table className="size-5 text-white" />
+              </div>
+              Year-by-Year Projection
+            </CardTitle>
+            <CardDescription className="mt-1">Detailed annual breakdown in today's £ — all figures are inflation-adjusted</CardDescription>
           </div>
-          Year-by-Year Projection
-        </CardTitle>
-        <CardDescription>Detailed annual breakdown in today's £ — all figures are inflation-adjusted</CardDescription>
+          <CollapseToggle open={open} onToggle={() => setOpen(!open)} />
+        </div>
       </CardHeader>
+      {open && (
       <CardContent>
         <div className="overflow-x-auto -mx-6 px-6">
           <table className="w-full text-xs" role="table">
@@ -87,6 +95,7 @@ export function ProjectionTable({ projection }: ProjectionTableProps) {
           </div>
         )}
       </CardContent>
+      )}
     </Card>
   )
 }

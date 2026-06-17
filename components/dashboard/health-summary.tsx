@@ -1,8 +1,10 @@
 "use client"
 
+import { useState } from "react"
 import type { HealthScore, HouseholdConfig } from "@/lib/types"
 import { formatCurrency } from "@/lib/engine"
 import { TrendingUp, PoundSterling } from "lucide-react"
+import { CollapseToggle } from "./collapse-toggle"
 
 interface HealthSummaryProps {
   score: HealthScore
@@ -51,8 +53,15 @@ export function HealthSummary({ score, config }: HealthSummaryProps) {
 
   const prob = score.survivalProbability95
   const fillColor = prob >= 80 ? "#4f46e5" : prob >= 60 ? "#f59e0b" : "#ef4444"
+  const [open, setOpen] = useState(true)
 
   return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between px-1">
+        <span className="text-sm font-semibold text-muted-foreground">Overview</span>
+        <CollapseToggle open={open} onToggle={() => setOpen(!open)} />
+      </div>
+      {open && (
     <div className="grid grid-cols-3 gap-4" style={{ minHeight: 220 }}>
 
       {/* Left two-thirds — two KPI tiles stacked */}
@@ -108,6 +117,8 @@ export function HealthSummary({ score, config }: HealthSummaryProps) {
         </div>
       </div>
 
+    </div>
+      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import type { ScenarioConfig } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { FlaskConical, TrendingDown, HeartPulse, Clock, Wallet, RotateCcw, PoundSterling } from "lucide-react"
 import { getDefaultScenario } from "@/lib/engine"
+import { CollapseToggle } from "./collapse-toggle"
 
 interface ScenarioPanelProps {
   scenario: ScenarioConfig
@@ -33,6 +35,7 @@ function CurrencyInput({ value, onChange, id, disabled }: { value: number; onCha
 }
 
 export function ScenarioPanel({ scenario, onChange }: ScenarioPanelProps) {
+  const [open, setOpen] = useState(true)
   const update = (partial: Partial<ScenarioConfig>) => onChange({ ...scenario, ...partial })
 
   const hasChanges = JSON.stringify(scenario) !== JSON.stringify(getDefaultScenario())
@@ -50,18 +53,22 @@ export function ScenarioPanel({ scenario, onChange }: ScenarioPanelProps) {
             </CardTitle>
             <CardDescription>Test how changes would affect your financial outlook</CardDescription>
           </div>
-          {hasChanges && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onChange(getDefaultScenario())}
-              className="h-7 text-xs text-muted-foreground"
-            >
-              <RotateCcw className="size-3 mr-1" /> Reset
-            </Button>
-          )}
+          <div className="flex items-center gap-1.5">
+            {hasChanges && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onChange(getDefaultScenario())}
+                className="h-7 text-xs text-muted-foreground"
+              >
+                <RotateCcw className="size-3 mr-1" /> Reset
+              </Button>
+            )}
+            <CollapseToggle open={open} onToggle={() => setOpen(!open)} />
+          </div>
         </div>
       </CardHeader>
+      {open && (
       <CardContent className="flex flex-col gap-5">
         {/* Extra spending */}
         <div className="flex flex-col gap-3 rounded-lg border p-4">
@@ -230,6 +237,7 @@ export function ScenarioPanel({ scenario, onChange }: ScenarioPanelProps) {
           )}
         </div>
       </CardContent>
+      )}
     </Card>
   )
 }

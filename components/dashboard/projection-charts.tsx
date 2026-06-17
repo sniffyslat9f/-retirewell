@@ -8,6 +8,7 @@ import { HISTORICAL_START_YEARS, NOTABLE_YEARS, runHistoricalSequence, getHistor
 import { generateProjection } from "@/lib/engine"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { CollapseToggle } from "./collapse-toggle"
 import {
   AreaChart, Area, CartesianGrid, Line, LineChart, ComposedChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis, Legend, ReferenceLine,
@@ -111,6 +112,10 @@ function fmt(v: number): string {
 
 export function ProjectionCharts({ projection, monteCarlo, config, scenario }: ProjectionChartsProps) {
   const [historicalStartYear, setHistoricalStartYear] = useState<number>(2000)
+  const [openAccounts, setOpenAccounts] = useState(true)
+  const [openHistorical, setOpenHistorical] = useState(true)
+  const [openMonteCarlo, setOpenMonteCarlo] = useState(true)
+  const [openWithdrawal, setOpenWithdrawal] = useState(true)
 
   // Account breakdown — absolute £ values, log scale, zeros floored at 1
   const accountBreakdownData = useMemo(() => projection.map((p) => ({
@@ -154,15 +159,17 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
     }))
   }, [historicalStartYear, config, monteCarlo])
 
-  const historicalFailed = historicalData.some(d => d.historical <= 1)
-  const failureYear = historicalData.findIndex(d => d.historical <= 1)
-
   // Full tax-aware historical projection using actual S&P 500 real returns
   const historicalProjection = useMemo(() => {
     const years = config.projectionYears ?? 40
     const realReturns = getHistoricalRealReturnsArray(historicalStartYear, years)
     return generateProjection(config, 0.05, config.inflationRate ?? 0.025, scenario, realReturns)
   }, [historicalStartYear, config, scenario])
+
+  // Survive/fail verdict comes from the FULL tax-aware projection (so it matches the spreadsheet below)
+  const projectionYears = config.projectionYears ?? 40
+  const failureYear = historicalProjection.findIndex(p => p.portfolioValue <= 0)
+  const historicalFailed = failureYear !== -1
 
   // Withdrawal rate over time
   const withdrawalRateData = useMemo(() => projection.map((p) => {
@@ -179,12 +186,18 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
       {/* G — Account Breakdown (log scale £) */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2.5 text-base">
-            <IOS color="bg-teal-500"><Layers className="size-5 text-white" /></IOS>
-            Account Breakdown Over Time
-          </CardTitle>
-          <CardDescription>Portfolio composition by account type · Today's £</CardDescription>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2.5 text-base">
+                <IOS color="bg-teal-500"><Layers className="size-5 text-white" /></IOS>
+                Account Breakdown Over Time
+              </CardTitle>
+              <CardDescription className="mt-1">Portfolio composition by account type · Today's £</CardDescription>
+            </div>
+            <CollapseToggle open={openAccounts} onToggle={() => setOpenAccounts(!openAccounts)} />
+          </div>
         </CardHeader>
+        {openAccounts && (
         <CardContent>
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -202,6 +215,7 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
             </ResponsiveContainer>
           </div>
         </CardContent>
+        )}
       </Card>
 
       {/* H — Historical Sequence (log scale) */}
@@ -217,16 +231,19 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
                 How would your portfolio have performed retiring in a specific year? Uses actual S&P 500 real returns · Today's £
               </CardDescription>
             </div>
-            <Select value={historicalStartYear.toString()} onValueChange={(v) => setHistoricalStartYear(Number(v))}>
-              <SelectTrigger className="w-[220px] shrink-0 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {HISTORICAL_START_YEARS.map(year => (
-                  <SelectItem key={year} value={year.toString()} className="text-xs">
-                    {NOTABLE_YEARS[year] ?? year.toString()}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Select value={historicalStartYear.toString()} onValueChange={(v) => setHistoricalStartYear(Number(v))}>
+                <SelectTrigger className="w-[220px] shrink-0 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {HISTORICAL_START_YEARS.map(year => (
+                    <SelectItem key={year} value={year.toString()} className="text-xs">
+                      {NOTABLE_YEARS[year] ?? year.toString()}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <CollapseToggle open={openHistorical} onToggle={() => setOpenHistorical(!openHistorical)} />
+            </div>
           </div>
           {historicalFailed ? (
             <div className="mt-2 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive font-medium">
@@ -234,10 +251,11 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
             </div>
           ) : (
             <div className="mt-2 rounded-md bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700 font-medium">
-              ✅ Portfolio survives the full 35 years under this historical sequence
+              ✅ Portfolio survives the full {projectionYears} years under this historical sequence
             </div>
           )}
         </CardHeader>
+        {openHistorical && (<>
         <CardContent>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -301,17 +319,24 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
             </div>
           </div>
         </CardContent>
+        </>)}
       </Card>
 
       {/* Monte Carlo confidence bands (log scale) */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2.5 text-base">
-            <IOS color="bg-violet-500"><TrendingUp className="size-5 text-white" /></IOS>
-            Portfolio Projection — Confidence Bands
-          </CardTitle>
-          <CardDescription>800 Monte Carlo scenarios showing range of outcomes · Today's £</CardDescription>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2.5 text-base">
+                <IOS color="bg-violet-500"><TrendingUp className="size-5 text-white" /></IOS>
+                Portfolio Projection — Confidence Bands
+              </CardTitle>
+              <CardDescription className="mt-1">800 Monte Carlo scenarios showing range of outcomes · Today's £</CardDescription>
+            </div>
+            <CollapseToggle open={openMonteCarlo} onToggle={() => setOpenMonteCarlo(!openMonteCarlo)} />
+          </div>
         </CardHeader>
+        {openMonteCarlo && (
         <CardContent>
           <div className="h-[340px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -330,17 +355,24 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
             </ResponsiveContainer>
           </div>
         </CardContent>
+        )}
       </Card>
 
       {/* Withdrawal Rate Over Time */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2.5 text-base">
-            <IOS color="bg-orange-500"><Percent className="size-5 text-white" /></IOS>
-            Withdrawal Rate Over Time
-          </CardTitle>
-          <CardDescription>Portfolio withdrawal rate each year — how much of your portfolio you draw down annually</CardDescription>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2.5 text-base">
+                <IOS color="bg-orange-500"><Percent className="size-5 text-white" /></IOS>
+                Withdrawal Rate Over Time
+              </CardTitle>
+              <CardDescription className="mt-1">Portfolio withdrawal rate each year — how much of your portfolio you draw down annually</CardDescription>
+            </div>
+            <CollapseToggle open={openWithdrawal} onToggle={() => setOpenWithdrawal(!openWithdrawal)} />
+          </div>
         </CardHeader>
+        {openWithdrawal && (
         <CardContent>
           <div className="h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -364,6 +396,7 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
             </ResponsiveContainer>
           </div>
         </CardContent>
+        )}
       </Card>
 
     </div>

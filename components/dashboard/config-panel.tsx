@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Slider } from "@/components/ui/slider"
 import { Users, PoundSterling, ShieldCheck, Plus, X, GripVertical, TrendingUp, Download, Upload } from "lucide-react"
+import { CollapseToggle } from "./collapse-toggle"
 
 interface ConfigPanelProps {
   config: HouseholdConfig
@@ -391,6 +392,7 @@ function PersonForm({
 }
 
 export function ConfigPanel({ config, onChange, onImport, onExport }: ConfigPanelProps) {
+  const [open, setOpen] = useState(true)
   const update = (partial: Partial<HouseholdConfig>) => onChange({ ...config, ...partial })
   const updatePerson1 = (p: PersonConfig) => update({ person1: p })
   const updatePerson2 = (p: PersonConfig) => update({ person2: p })
@@ -426,10 +428,12 @@ export function ConfigPanel({ config, onChange, onImport, onExport }: ConfigPane
                 <Download className="size-3" />Export
               </Button>
             )}
+            <CollapseToggle open={open} onToggle={() => setOpen(!open)} />
           </div>
         </div>
         <CardDescription>Enter your current financial situation below</CardDescription>
       </CardHeader>
+      {open && (
       <CardContent className="flex flex-col gap-6">
 
         {/* Household spending */}
@@ -678,6 +682,7 @@ export function ConfigPanel({ config, onChange, onImport, onExport }: ConfigPane
           </TabsContent>
         </Tabs>
       </CardContent>
+      )}
     </Card>
   )
 }
