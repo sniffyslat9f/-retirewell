@@ -12,7 +12,7 @@ const SCOT_INTERMEDIATE_LIMIT = 43662
 const SCOT_HIGHER_LIMIT = 75000
 const SCOT_ADVANCED_LIMIT = 125140
 
-function calculateUKIncomeTax(taxableIncome: number, scottish: boolean): number {
+export function calculateUKIncomeTax(taxableIncome: number, scottish: boolean): number {
   if (taxableIncome <= 0) return 0
 
   // Personal allowance taper above £100,000
@@ -28,7 +28,9 @@ function calculateUKIncomeTax(taxableIncome: number, scottish: boolean): number 
   }
 
   let tax = 0
-  const basicLimit = UK_BASIC_RATE_LIMIT - personalAllowance
+  // The 20% basic-rate band is a fixed width (£37,700) and does NOT widen when the personal
+  // allowance is tapered away above £100k. Only the higher-rate threshold moves with the allowance.
+  const basicLimit = UK_BASIC_RATE_LIMIT - UK_PERSONAL_ALLOWANCE
   const higherLimit = UK_HIGHER_RATE_LIMIT - personalAllowance
 
   if (taxable <= basicLimit) {
@@ -73,7 +75,7 @@ const CGT_BASIC_RATE = 0.18
 const CGT_HIGHER_RATE = 0.24
 const UK_BASIC_RATE_THRESHOLD = 50270  // income above this = higher rate CGT
 
-function calculateCGT(
+export function calculateCGT(
   giaWithdrawal: number,
   giaCostBasisWithdrawn: number,
   taxableIncome: number,
@@ -138,18 +140,66 @@ function solveGrossForNet(
 // UK property income allowance
 const PROPERTY_ALLOWANCE = 1000
 
-function calculatePersonTax(
+// Dividend tax (2024/25): £500 tax-free allowance, then 8.75% / 33.75% / 39.35%.
+// Charged on income thrown off by taxable (general account) holdings — ISAs/SIPPs are sheltered.
+const DIVIDEND_ALLOWANCE = 500
+const DIV_BASIC = 0.0875, DIV_HIGHER = 0.3375, DIV_ADDITIONAL = 0.3935
+
+// Pension tax-free lump sum allowance (2024/25). The 25% tax-free portion of pension
+// withdrawals is capped at this cumulative amount — matters for large SIPPs/pensions.
+const LUMP_SUM_ALLOWANCE = 268275
+
+// Dividends stack on top of other taxable income. The £500 allowance occupies band space.
+export function calculateDividendTax(dividends: number, otherTaxableIncome: number): number {
+  const taxable = Math.max(0, dividends - DIVIDEND_ALLOWANCE)
+  if (taxable <= 0) return 0
+  const start = Math.max(otherTaxableIncome, UK_PERSONAL_ALLOWANCE) + DIVIDEND_ALLOWANCE
+  let remaining = taxable, tax = 0
+  const basicRoom = Math.max(0, UK_BASIC_RATE_LIMIT - start)
+  const inBasic = Math.min(remaining, basicRoom); tax += inBasic * DIV_BASIC; remaining -= inBasic
+  const higherRoom = Math.max(0, UK_HIGHER_RATE_LIMIT - Math.max(start, UK_BASIC_RATE_LIMIT))
+  const inHigher = Math.min(remaining, higherRoom); tax += inHigher * DIV_HIGHER; remaining -= inHigher
+  tax += remaining * DIV_ADDITIONAL
+  return Math.round(tax)
+}
+
+// Savings interest taxed at income-tax rates (UK rates apply to savings even in Scotland).
+// Personal Savings Allowance: £1,000 (basic rate) / £500 (higher) / £0 (additional).
+export function calculateSavingsTax(interest: number, otherTaxableIncome: number): number {
+  let psa = 1000
+  if (otherTaxableIncome > UK_BASIC_RATE_LIMIT) psa = 500
+  if (otherTaxableIncome > UK_HIGHER_RATE_LIMIT) psa = 0
+  const taxable = Math.max(0, interest - psa)
+  if (taxable <= 0) return 0
+  const start = Math.max(otherTaxableIncome, UK_PERSONAL_ALLOWANCE) + psa
+  let remaining = taxable, tax = 0
+  const basicRoom = Math.max(0, UK_BASIC_RATE_LIMIT - start)
+  const inBasic = Math.min(remaining, basicRoom); tax += inBasic * 0.20; remaining -= inBasic
+  const higherRoom = Math.max(0, UK_HIGHER_RATE_LIMIT - Math.max(start, UK_BASIC_RATE_LIMIT))
+  const inHigher = Math.min(remaining, higherRoom); tax += inHigher * 0.40; remaining -= inHigher
+  tax += remaining * 0.45
+  return Math.round(tax)
+}
+
+export function calculatePersonTax(
   person: PersonConfig,
   age: number,
   pensionWithdrawal: number,
   giaWithdrawal: number,
   giaCostBasisWithdrawn: number,
-): { incomeTax: number; cgt: number; total: number; portfolioTax: number; taxableIncome: number } {
+  lumpSumRemaining: number = Infinity,
+): { incomeTax: number; cgt: number; total: number; portfolioTax: number; taxableIncome: number; taxFreeUsed: number } {
   let taxableIncome = 0
+  let taxFreeUsed = 0
 
-  // SIPP/pension withdrawals — taxed as income
+  // SIPP/pension withdrawals — taxed as income.
+  // 25% of each withdrawal is tax-free, but only until the cumulative tax-free total reaches
+  // the lump-sum allowance (£268,275). Beyond that, the whole withdrawal is taxable.
+  // If the lump sum was already taken upfront, the remaining pot is fully taxable.
   if (!person.taxFreeLumpSumTaken) {
-    taxableIncome += pensionWithdrawal * 0.75
+    const taxFree = Math.min(0.25 * pensionWithdrawal, Math.max(0, lumpSumRemaining))
+    taxFreeUsed = taxFree
+    taxableIncome += pensionWithdrawal - taxFree
   } else {
     taxableIncome += pensionWithdrawal
   }
@@ -189,6 +239,7 @@ function calculatePersonTax(
     total: totalIncomeTax + cgt,
     portfolioTax: portfolioIncomeTax + cgt,
     taxableIncome,
+    taxFreeUsed,
   }
 }
 
@@ -308,6 +359,24 @@ function withdrawFromAccounts(
   return { ...newBalances, pensionWithdrawn, giaWithdrawn }
 }
 
+// Deduct a flat amount (e.g. a tax bill) from the accounts in the given order.
+// Returns the updated balances only.
+function payFromBalances(
+  balances: { cash: number; isa: number; sipp: number; general: number },
+  amount: number,
+  order: AccountType[]
+): { cash: number; isa: number; sipp: number; general: number } {
+  let remaining = amount
+  const newBalances = { ...balances }
+  for (const account of order) {
+    if (remaining <= 0) break
+    const take = Math.min(newBalances[account], remaining)
+    newBalances[account] -= take
+    remaining -= take
+  }
+  return newBalances
+}
+
 export function generateProjection(
   config: HouseholdConfig,
   growthRate: number = 0.05,
@@ -322,6 +391,14 @@ export function generateProjection(
   const bondsReturn = config.bondsReturn ?? BOND_RETURN
   const tripleLock = config.tripleLockStatePension ?? false
   const wc = config.withdrawalConfig ?? { method: "constant", percentOfPortfolio: 4, floorPct: 2.5, ceilingPct: 5, guardrailLower: 20, guardrailUpper: 20 }
+
+  // Tier 1 accuracy inputs (defaults applied when not set)
+  const annualCharges = config.annualCharges ?? 0.005      // 0.5%/yr platform + fund charges
+  const dividendYield = config.dividendYield ?? 0.02        // income yield on taxable holdings
+  const cashInterestRate = config.cashInterestRate ?? 0.035 // nominal interest on cash
+  // Cumulative pension tax-free cash each person has left available (lump-sum allowance)
+  let p1LumpSumRemaining = LUMP_SUM_ALLOWANCE
+  let p2LumpSumRemaining = LUMP_SUM_ALLOWANCE
 
   let p1Balances = {
     cash: config.person1.cashSavings,
@@ -375,6 +452,11 @@ export function generateProjection(
     const totalPortfolio =
       p1Balances.cash + p1Balances.isa + p1Balances.sipp + p1Balances.general +
       p2Balances.cash + p2Balances.isa + p2Balances.sipp + p2Balances.general
+
+    // Start-of-year balances of the TAXABLE accounts — used to work out this year's
+    // taxable dividends (general account) and savings interest (cash).
+    const p1GiaStart = p1Balances.general, p2GiaStart = p2Balances.general
+    const p1CashStart = p1Balances.cash, p2CashStart = p2Balances.cash
 
     if (totalPortfolio <= 0 && year > 0) {
       // Portfolio is exhausted, but the couple still receive state pension and any
@@ -495,8 +577,8 @@ export function generateProjection(
     let p2GrossNeeded = p2NetNeeded
     let p1Result = withdrawFromAccounts(p1Balances, 0, config.person1.drawdownOrder)
     let p2Result = withdrawFromAccounts(p2Balances, 0, config.person2.drawdownOrder)
-    let p1TaxResult = { incomeTax: 0, cgt: 0, total: 0, portfolioTax: 0, taxableIncome: 0 }
-    let p2TaxResult = { incomeTax: 0, cgt: 0, total: 0, portfolioTax: 0, taxableIncome: 0 }
+    let p1TaxResult = { incomeTax: 0, cgt: 0, total: 0, portfolioTax: 0, taxableIncome: 0, taxFreeUsed: 0 }
+    let p2TaxResult = { incomeTax: 0, cgt: 0, total: 0, portfolioTax: 0, taxableIncome: 0, taxFreeUsed: 0 }
     let p1CostBasisWithdrawn = 0
     let p2CostBasisWithdrawn = 0
 
@@ -509,8 +591,8 @@ export function generateProjection(
       const p2CostBasisRatio = p2Balances.general > 0 ? Math.min(1, p2GiaCostBasis / p2Balances.general) : 0
       p2CostBasisWithdrawn = p2Result.giaWithdrawn * p2CostBasisRatio
 
-      p1TaxResult = calculatePersonTax(p1ForTax, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn)
-      p2TaxResult = calculatePersonTax(p2ForTax, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn)
+      p1TaxResult = calculatePersonTax(p1ForTax, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn, p1LumpSumRemaining)
+      p2TaxResult = calculatePersonTax(p2ForTax, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn, p2LumpSumRemaining)
 
       // Gross up for ALL portfolio taxes: income tax on SIPP + CGT on GIA
       // portfolioTax = income tax attributable to portfolio + CGT on GIA withdrawals
@@ -528,8 +610,12 @@ export function generateProjection(
     const p2CostBasisRatioFinal = p2Balances.general > 0 ? Math.min(1, p2GiaCostBasis / p2Balances.general) : 0
     p2CostBasisWithdrawn = p2Result.giaWithdrawn * p2CostBasisRatioFinal
 
-    p1TaxResult = calculatePersonTax(p1ForTax, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn)
-    p2TaxResult = calculatePersonTax(p2ForTax, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn)
+    p1TaxResult = calculatePersonTax(p1ForTax, age1, p1Result.pensionWithdrawn, p1Result.giaWithdrawn, p1CostBasisWithdrawn, p1LumpSumRemaining)
+    p2TaxResult = calculatePersonTax(p2ForTax, age2, p2Result.pensionWithdrawn, p2Result.giaWithdrawn, p2CostBasisWithdrawn, p2LumpSumRemaining)
+
+    // Reduce each person's remaining tax-free lump-sum allowance by what they used this year
+    p1LumpSumRemaining = Math.max(0, p1LumpSumRemaining - p1TaxResult.taxFreeUsed)
+    p2LumpSumRemaining = Math.max(0, p2LumpSumRemaining - p2TaxResult.taxFreeUsed)
 
     const portfolioNeeded = p1GrossNeeded + p2GrossNeeded
 
@@ -619,26 +705,43 @@ export function generateProjection(
     const historicalReal = yearlyRealReturns?.[year]
     const useHistorical = historicalReal !== undefined
 
+    // Investment growth, less the annual charge (platform + fund fees) — a real drag every year.
     const growthFactor = (stocksPct: number) =>
-      useHistorical
+      (useHistorical
         ? 1 + historicalReal
-        : 1 + blendedReturn(stocksPct, stocksReturn, bondsReturn) - inflationRate
+        : 1 + blendedReturn(stocksPct, stocksReturn, bondsReturn) - inflationRate) - annualCharges
+
+    // Cash grows at its interest rate, in real (today's-money) terms.
+    const cashGrowthFactor = 1 + (cashInterestRate - inflationRate)
 
     const p1GiaGrowth = growthFactor(config.person1.generalAllocation.stocksPct)
     const p2GiaGrowth = growthFactor(config.person2.generalAllocation.stocksPct)
 
     p1Balances = {
-      cash: p1Result.cash,
+      cash: p1Result.cash * cashGrowthFactor,
       isa: p1IsaAfterBi * growthFactor(config.person1.isaAllocation.stocksPct),
       sipp: p1Result.sipp * growthFactor(config.person1.sippAllocation.stocksPct),
       general: p1GeneralAfterBi * p1GiaGrowth,
     }
     p2Balances = {
-      cash: p2Result.cash,
+      cash: p2Result.cash * cashGrowthFactor,
       isa: p2IsaAfterBi * growthFactor(config.person2.isaAllocation.stocksPct),
       sipp: p2Result.sipp * growthFactor(config.person2.sippAllocation.stocksPct),
       general: p2GeneralAfterBi * p2GiaGrowth,
     }
+
+    // Tax on income thrown off by the TAXABLE accounts this year (dividends on the general
+    // account, interest on cash). ISAs and SIPPs are sheltered, so nothing here applies to them.
+    // The dividends/interest are already part of the growth above — here we only levy the tax,
+    // which is paid out of each person's pot (cash first).
+    const p1DivTax = calculateDividendTax(p1GiaStart * dividendYield, p1TaxResult.taxableIncome)
+    const p2DivTax = calculateDividendTax(p2GiaStart * dividendYield, p2TaxResult.taxableIncome)
+    const p1IntTax = calculateSavingsTax(p1CashStart * cashInterestRate, p1TaxResult.taxableIncome)
+    const p2IntTax = calculateSavingsTax(p2CashStart * cashInterestRate, p2TaxResult.taxableIncome)
+    const payOrder: AccountType[] = ["cash", "general", "isa", "sipp"]
+    p1Balances = { ...p1Balances, ...payFromBalances(p1Balances, p1DivTax + p1IntTax, payOrder) }
+    p2Balances = { ...p2Balances, ...payFromBalances(p2Balances, p2DivTax + p2IntTax, payOrder) }
+    const investmentIncomeTax = p1DivTax + p2DivTax + p1IntTax + p2IntTax
 
     // Cost basis is a fixed nominal amount (what was originally paid) — it does NOT
     // grow with the market. Because all balances are held in today's money, deflate the
@@ -672,8 +775,8 @@ export function generateProjection(
       age1, age2,
       portfolioValue: Math.round(endPortfolio),
       withdrawals: Math.round(portfolioNeeded),
-      taxPaid: Math.round(totalTax + totalBedIsaCgt),
-      incomeTax: Math.round(p1TaxResult.incomeTax + p2TaxResult.incomeTax),
+      taxPaid: Math.round(totalTax + totalBedIsaCgt + investmentIncomeTax),
+      incomeTax: Math.round(p1TaxResult.incomeTax + p2TaxResult.incomeTax + investmentIncomeTax),
       cgt: totalCgt,
       statePensionIncome: Math.round(statePensionTotal),
       otherIncome: Math.round(totalOtherIncome),
@@ -906,6 +1009,9 @@ export function getDefaultConfig(): HouseholdConfig {
       guardrailUpper: 20,
     },
     spendingPhases: [],
+    annualCharges: 0.005,
+    dividendYield: 0.02,
+    cashInterestRate: 0.035,
   }
 }
 

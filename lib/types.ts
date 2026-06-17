@@ -57,6 +57,10 @@ export interface HouseholdConfig {
   tripleLockStatePension: boolean
   withdrawalConfig: WithdrawalConfig
   spendingPhases: SpendingPhase[]  // empty = use annualSpending flat
+  // Tier 1 accuracy additions (all optional so older saved files still load):
+  annualCharges?: number       // platform + fund charges as a fraction, e.g. 0.005 = 0.5%/yr — drags on returns
+  dividendYield?: number       // income yield on taxable (general) holdings, e.g. 0.02 = 2% — taxed at dividend rates
+  cashInterestRate?: number    // nominal interest earned on cash savings, e.g. 0.035 — taxed as savings income
 }
 
 export interface PersonConfig {

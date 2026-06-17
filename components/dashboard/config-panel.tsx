@@ -626,6 +626,37 @@ export function ConfigPanel({ config, onChange, onImport, onExport }: ConfigPane
           </div>
         </div>
 
+        {/* Costs & taxable-income assumptions */}
+        <div className="flex flex-col gap-3">
+          <h5 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Costs &amp; Taxable Income</h5>
+          <div className="rounded-lg border p-3 bg-secondary/20 flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">Annual charges (platform + funds)</Label>
+                <span className="text-xs font-medium">{((config.annualCharges ?? 0.005) * 100).toFixed(2)}%</span>
+              </div>
+              <Slider min={0} max={2} step={0.05} value={[(config.annualCharges ?? 0.005) * 100]} onValueChange={([v]) => update({ annualCharges: v / 100 })} />
+              <p className="text-xs text-muted-foreground">A yearly fee deducted from investment growth.</p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">Dividend yield on taxable account</Label>
+                <span className="text-xs font-medium">{((config.dividendYield ?? 0.02) * 100).toFixed(1)}%</span>
+              </div>
+              <Slider min={0} max={6} step={0.25} value={[(config.dividendYield ?? 0.02) * 100]} onValueChange={([v]) => update({ dividendYield: v / 100 })} />
+              <p className="text-xs text-muted-foreground">Income from your General (non-ISA) holdings — taxed yearly at dividend rates. ISAs &amp; pensions are exempt.</p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs text-muted-foreground">Cash interest rate</Label>
+                <span className="text-xs font-medium">{((config.cashInterestRate ?? 0.035) * 100).toFixed(1)}%</span>
+              </div>
+              <Slider min={0} max={7} step={0.25} value={[(config.cashInterestRate ?? 0.035) * 100]} onValueChange={([v]) => update({ cashInterestRate: v / 100 })} />
+              <p className="text-xs text-muted-foreground">Interest earned on cash savings — taxed yearly as savings income.</p>
+            </div>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between px-1">
           <Label htmlFor="include-ni" className="text-xs text-muted-foreground">Include National Insurance</Label>
           <Switch id="include-ni" checked={config.includeNI} onCheckedChange={(v) => update({ includeNI: v })} />
