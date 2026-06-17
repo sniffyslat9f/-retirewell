@@ -448,8 +448,11 @@ export function generateProjection(
   let p1GiaCostBasis = Math.min(config.person1.giaCostBasis, config.person1.generalInvestments)
   let p2GiaCostBasis = Math.min(config.person2.giaCostBasis, config.person2.generalInvestments)
 
+  // Lifestyle spending feeds the withdrawal strategy. Extra spending and care costs are
+  // separate, unavoidable add-ons that must be paid ON TOP of whatever the strategy decides
+  // (otherwise the % / dynamic / guardrail methods would silently ignore them).
   let annualSpending = config.annualSpending
-  if (scenario?.extraSpending) annualSpending += scenario.extraSpending
+  const extraSpending = scenario?.extraSpending ?? 0
 
   if (scenario?.marketCrash) {
     const crashFactor = 1 - (scenario.marketCrashPercent / 100)
@@ -570,9 +573,12 @@ export function generateProjection(
       }
     }
 
-    // Apply withdrawal method to determine target spending this year
-    const targetSpending = calculateTargetSpending(wc, baseSpending + careCost, totalPortfolio, initialPortfolio, initialWithdrawalRate, prevSpending + careCost)
-    prevSpending = targetSpending - careCost
+    // The withdrawal strategy decides lifestyle spending from the lifestyle target only.
+    const lifestyleSpending = calculateTargetSpending(wc, baseSpending, totalPortfolio, initialPortfolio, initialWithdrawalRate, prevSpending)
+    // Track lifestyle spending for next year's floor/ceiling/guardrail continuity (add-ons excluded).
+    prevSpending = lifestyleSpending
+    // Add the unavoidable extras on top, so every method honours care costs and extra spending.
+    const targetSpending = lifestyleSpending + careCost + extraSpending
 
     // targetSpending is NET — what the household actually receives after all tax
     // Income sources (state pension, DB pension) are GROSS — we must deduct tax on them

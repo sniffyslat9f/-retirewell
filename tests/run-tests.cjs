@@ -76,5 +76,22 @@ console.log('\n# New defaults reflect Vanguard VUSA figures')
 ok('default charges = 0.10%', Math.abs(base.annualCharges - 0.001) < 1e-9)
 ok('default dividend yield = 1.25%', Math.abs(base.dividendYield - 0.0125) < 1e-9)
 
+console.log('\n# Care cost & extra spending apply for EVERY withdrawal method')
+const careScen = { ...E.getDefaultScenario(), careCostEnabled: true, careCostAge: 85, annualCareCost: 50000 }
+function spendAt85(method, scen) {
+  const cfg = { ...base, withdrawalConfig: { ...base.withdrawalConfig, method } }
+  const p = E.generateProjection(cfg, undefined, cfg.inflationRate, scen)
+  const row = p.find(r => Math.max(r.age1, r.age2) >= 85 && r.portfolioValue > 0)
+  return row ? row.spending : 0
+}
+for (const m of ['constant', 'percent', 'vanguard_dynamic', 'guyton_klinger']) {
+  ok(`care cost raises spending for "${m}" method`, spendAt85(m, careScen) > spendAt85(m, undefined) + 40000)
+}
+const extraScen = { ...E.getDefaultScenario(), extraSpending: 10000 }
+const pctCfg = { ...base, withdrawalConfig: { ...base.withdrawalConfig, method: 'percent' } }
+const yr1Extra = E.generateProjection(pctCfg, undefined, pctCfg.inflationRate, extraScen)[0].spending
+const yr1Base = E.generateProjection(pctCfg, undefined, pctCfg.inflationRate, undefined)[0].spending
+ok('extra spending applies to "% of portfolio" method (year 1 ≈ +£10k)', Math.abs((yr1Extra - yr1Base) - 10000) < 200)
+
 console.log(`\n==== ${pass} passed, ${fail} failed ====`)
 process.exit(fail === 0 ? 0 : 1)
