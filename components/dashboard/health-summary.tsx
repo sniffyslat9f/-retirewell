@@ -97,11 +97,11 @@ export function HealthSummary({ score, config }: HealthSummaryProps) {
         </div>
 
         <div className="flex-1 flex flex-col items-center justify-center">
-          <SemiGauge prob={prob} />
+          <SemiGauge prob={Math.max(0, prob)} />
           <p className="text-5xl font-bold tabular-nums -mt-2" style={{ color: fillColor }}>
-            {prob}%
+            {prob < 0 ? "N/A" : `${prob}%`}
           </p>
-          <p className="text-xs text-slate-400 mt-1">Probability of success</p>
+          <p className="text-xs text-slate-400 mt-1">{prob < 0 ? "Extend projection years to assess" : "Probability of success"}</p>
           <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-semibold mt-2">
             Current plan
           </span>

@@ -55,5 +55,26 @@ ok('dividends taxed -> smaller pot', endVal(proj({ dividendYield: 0.05 })) < end
 const noTax = proj({ dividendYield: 0, cashInterestRate: 0, annualCharges: 0 })
 ok('no NaN / valid numbers in projection', noTax.every(r => Number.isFinite(r.portfolioValue) && Number.isFinite(r.taxPaid)))
 
+console.log('\n# Tier-2 risk modelling')
+eq('100% stocks volatility = stock vol (17%)', E.portfolioVolatility(100), 0.17, 0.001)
+eq('100% bonds volatility = bond vol (7%)', E.portfolioVolatility(0), 0.07, 0.001)
+ok('60/40 mix is LESS volatile than a straight blend (diversification)',
+  E.portfolioVolatility(60) < 0.6 * 0.17 + 0.4 * 0.07)
+// Fat-tailed draws: over many samples the mean ~0 and variance ~1 (loose tolerance)
+let n = 200000, sum = 0, sumSq = 0
+for (let i = 0; i < n; i++) { const x = E.fatTailedDraw(); sum += x; sumSq += x * x }
+const mean = sum / n, varc = sumSq / n - mean * mean
+ok('fat-tailed draw mean ≈ 0', Math.abs(mean) < 0.05)
+ok('fat-tailed draw variance ≈ 1', Math.abs(varc - 1) < 0.15)
+
+console.log('\n# Tier-3 survival-to-100 honesty')
+const young = { ...base, person1: { ...base.person1, age: 55 }, person2: { ...base.person2, age: 55 }, projectionYears: 40 }
+// 40-year projection from age 55 reaches age 95, not 100 -> "to 100" must read N/A (-1), not a misleading 0
+ok('survival-to-100 is N/A when projection too short (not a false 0)', E.calculateHealthScore(young).survivalProbability100 === -1)
+
+console.log('\n# New defaults reflect Vanguard VUSA figures')
+ok('default charges = 0.10%', Math.abs(base.annualCharges - 0.001) < 1e-9)
+ok('default dividend yield = 1.25%', Math.abs(base.dividendYield - 0.0125) < 1e-9)
+
 console.log(`\n==== ${pass} passed, ${fail} failed ====`)
 process.exit(fail === 0 ? 0 : 1)

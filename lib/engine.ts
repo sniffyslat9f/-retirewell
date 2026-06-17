@@ -269,6 +269,38 @@ function blendedVolatility(stocksPct: number): number {
   return s * STOCK_VOLATILITY + (1 - s) * BOND_VOLATILITY
 }
 
+// Stocks and bonds don't move perfectly together, so a mixed portfolio is less volatile
+// than a simple blend suggests (the diversification benefit). This uses the proper
+// portfolio-variance formula with a modest long-run stock/bond correlation.
+const STOCK_BOND_CORRELATION = 0.15
+export function portfolioVolatility(stocksPct: number): number {
+  const s = stocksPct / 100, b = 1 - s
+  const variance =
+    s * s * STOCK_VOLATILITY * STOCK_VOLATILITY +
+    b * b * BOND_VOLATILITY * BOND_VOLATILITY +
+    2 * s * b * STOCK_BOND_CORRELATION * STOCK_VOLATILITY * BOND_VOLATILITY
+  return Math.sqrt(variance)
+}
+
+// A standard-normal draw (Box-Muller).
+function gaussian(): number {
+  const u1 = Math.random(), u2 = Math.random()
+  return Math.sqrt(-2 * Math.log(Math.max(u1, 1e-10))) * Math.cos(2 * Math.PI * u2)
+}
+
+// A fat-tailed draw (Student-t, 5 degrees of freedom), normalised to ~unit variance.
+// Real market returns have fatter tails than a bell curve — big crashes happen more often
+// than a normal distribution predicts. This makes the success simulation more realistic
+// (and a little more cautious) than pure normal returns.
+export function fatTailedDraw(): number {
+  const df = 5
+  const z = gaussian()
+  let chiSq = 0
+  for (let i = 0; i < df; i++) { const g = gaussian(); chiSq += g * g }
+  const t = z / Math.sqrt(chiSq / df)
+  return t * Math.sqrt((df - 2) / df)  // rescale so variance ≈ 1
+}
+
 // Withdrawal method: calculates target spending for this year
 function calculateTargetSpending(
   wc: WithdrawalConfig,
@@ -393,8 +425,8 @@ export function generateProjection(
   const wc = config.withdrawalConfig ?? { method: "constant", percentOfPortfolio: 4, floorPct: 2.5, ceilingPct: 5, guardrailLower: 20, guardrailUpper: 20 }
 
   // Tier 1 accuracy inputs (defaults applied when not set)
-  const annualCharges = config.annualCharges ?? 0.005      // 0.5%/yr platform + fund charges
-  const dividendYield = config.dividendYield ?? 0.02        // income yield on taxable holdings
+  const annualCharges = config.annualCharges ?? 0.001       // 0.10%/yr (matches getDefaultConfig — Vanguard VUSA)
+  const dividendYield = config.dividendYield ?? 0.0125       // 1.25% income yield (matches getDefaultConfig)
   const cashInterestRate = config.cashInterestRate ?? 0.035 // nominal interest on cash
   // Cumulative pension tax-free cash each person has left available (lump-sum allowance)
   let p1LumpSumRemaining = LUMP_SUM_ALLOWANCE
@@ -818,16 +850,15 @@ function simulatePaths(config: HouseholdConfig, simulations: number, scenario?: 
   const stocks = weightedStocksPct(config)
   // Respect the user's own return assumptions (was previously ignored here).
   const mean = blendedReturn(stocks, config.stocksReturn ?? STOCK_RETURN, config.bondsReturn ?? BOND_RETURN)
-  const stdDev = blendedVolatility(stocks)
+  // Correlation-adjusted volatility (diversification) and fat-tailed draws (realistic crashes).
+  const stdDev = portfolioVolatility(stocks)
   const realMean = mean - (config.inflationRate ?? 0.025)
 
   const results: number[][] = []
   for (let sim = 0; sim < simulations; sim++) {
     const returns = new Array<number>(maxYears)
     for (let y = 0; y < maxYears; y++) {
-      const u1 = Math.random(), u2 = Math.random()
-      const z = Math.sqrt(-2 * Math.log(Math.max(u1, 1e-10))) * Math.cos(2 * Math.PI * u2)
-      returns[y] = realMean + stdDev * z
+      returns[y] = realMean + stdDev * fatTailedDraw()
     }
     const proj = generateProjection(config, undefined, config.inflationRate, scenario, returns)
     results.push(proj.map(p => p.portfolioValue))
@@ -898,7 +929,8 @@ export function calculateHealthScore(config: HouseholdConfig, scenario?: Scenari
   const yearsTo100 = Math.max(0, 100 - Math.max(config.person1.age, config.person2.age))
 
   const survivalAt = (yearIdx: number) => {
-    if (yearIdx < 0 || yearIdx >= mc.survivalByYear.length) return yearIdx <= 0 ? 100 : 0
+    if (yearIdx < 0) return 100                          // target age already reached — trivially survived to now
+    if (yearIdx >= mc.survivalByYear.length) return -1   // projection doesn't run far enough to assess this age
     return mc.survivalByYear[yearIdx]
   }
 
@@ -1009,8 +1041,8 @@ export function getDefaultConfig(): HouseholdConfig {
       guardrailUpper: 20,
     },
     spendingPhases: [],
-    annualCharges: 0.005,
-    dividendYield: 0.02,
+    annualCharges: 0.001,    // 0.10% — Vanguard VUSA (0.07% fund) + capped £375 platform fee on a large pot
+    dividendYield: 0.0125,   // 1.25% — typical S&P 500 dividend yield (taxable in a general account)
     cashInterestRate: 0.035,
   }
 }
