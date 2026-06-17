@@ -113,7 +113,7 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
   const [historicalStartYear, setHistoricalStartYear] = useState<number>(2000)
 
   // Account breakdown — absolute £ values, log scale, zeros floored at 1
-  const accountBreakdownData = useMemo(() => projection.slice(0, 35).map((p) => ({
+  const accountBreakdownData = useMemo(() => projection.map((p) => ({
     year: p.year.toString(),
     ISA:  p.isaBalance,
     GIA:  p.generalBalance,
@@ -144,7 +144,7 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
         const sp1 = age1 >= config.person1.statePensionAge ? config.person1.statePensionAmount : 0
         const sp2 = age2 >= config.person2.statePensionAge ? config.person2.statePensionAmount : 0
         return Math.max(0, config.annualSpending - sp1 - sp2 - otherIncome)
-      }, 35
+      }, config.projectionYears ?? 40
     )
     return sequence.map((s, idx) => ({
       year: `Year ${idx + 1} (${s.year})`,
@@ -165,7 +165,7 @@ export function ProjectionCharts({ projection, monteCarlo, config, scenario }: P
   }, [historicalStartYear, config, scenario])
 
   // Withdrawal rate over time
-  const withdrawalRateData = useMemo(() => projection.slice(0, 40).map((p) => {
+  const withdrawalRateData = useMemo(() => projection.map((p) => {
     const rate = p.portfolioValue > 0 ? (p.withdrawals / p.portfolioValue) * 100 : 0
     return {
       year: p.year.toString(),

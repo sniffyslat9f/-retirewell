@@ -13,7 +13,7 @@ interface ProjectionTableProps {
 
 export function ProjectionTable({ projection }: ProjectionTableProps) {
   const [showAll, setShowAll] = useState(false)
-  const visibleRows = showAll ? projection.slice(0, 40) : projection.slice(0, 15)
+  const visibleRows = showAll ? projection : projection.slice(0, 15)
 
   return (
     <Card>
@@ -82,7 +82,7 @@ export function ProjectionTable({ projection }: ProjectionTableProps) {
         {projection.length > 15 && (
           <div className="mt-3 flex justify-center">
             <Button variant="outline" size="sm" onClick={() => setShowAll(!showAll)} className="text-xs">
-              {showAll ? "Show fewer years" : `Show all ${Math.min(40, projection.length)} years`}
+              {showAll ? "Show fewer years" : `Show all ${projection.length} years`}
             </Button>
           </div>
         )}
