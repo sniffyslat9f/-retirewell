@@ -93,5 +93,53 @@ const yr1Extra = E.generateProjection(pctCfg, undefined, pctCfg.inflationRate, e
 const yr1Base = E.generateProjection(pctCfg, undefined, pctCfg.inflationRate, undefined)[0].spending
 ok('extra spending applies to "% of portfolio" method (year 1 ≈ +£10k)', Math.abs((yr1Extra - yr1Base) - 10000) < 200)
 
+console.log('\n# Combined scenarios (catch bugs that only show up when rules interact)')
+
+// Scenario 1: SIPP withdrawal + a GIA gain in the same year, both within the basic-rate band.
+// Hand-calc: pension £30,000 -> 25% tax-free (£7,500) -> taxable £22,500 -> tax £1,986 (20% on £9,930 above PA).
+// GIA gain £6,000 (sold £20,000, cost basis £14,000) -> £3,000 above the £3,000 allowance -> all in
+// basic band (taxable income £22,500 is well under £50,270) -> CGT £540 (18%).
+{
+  const p = { taxFreeLumpSumTaken: false, receivingStatePension: false, statePensionAge: 99, statePensionAmount: 0, otherIncome: [], useScottishTax: false }
+  const r = E.calculatePersonTax(p, 60, 30000, 20000, 14000, Infinity)
+  eq('combined: SIPP £30k + GIA gain £6k -> income tax', r.incomeTax, 1986)
+  eq('combined: SIPP £30k + GIA gain £6k -> CGT', r.cgt, 540)
+  eq('combined: SIPP £30k + GIA gain £6k -> taxable income', r.taxableIncome, 22500)
+}
+
+// Scenario 2: SIPP + state pension push taxable income close to the £50,270 CGT basic/higher
+// boundary, then a GIA gain straddles that boundary. This is the case most likely to hide a bug —
+// CGT's rate depends on *combined* taxable income, not the GIA gain alone.
+// Hand-calc: pension £45,000 -> 25% tax-free £11,250 -> taxable £33,750. State pension £11,500
+// (fully inside the personal allowance, £0 tax on its own). Combined taxable income £45,250 -> tax £6,536.
+// GIA gain £10,000 (sold £15,000, cost £5,000) -> £7,000 taxable after allowance -> only £5,020 fits
+// in the basic band before hitting £50,270 -> £5,020 @ 18% + £1,980 @ 24% = £1,379.
+{
+  const p = { taxFreeLumpSumTaken: false, receivingStatePension: true, statePensionAge: 66, statePensionAmount: 11500, otherIncome: [], useScottishTax: false }
+  const r = E.calculatePersonTax(p, 66, 45000, 15000, 5000, Infinity)
+  eq('combined: SIPP+state pension £45.25k taxable -> income tax', r.incomeTax, 6536)
+  eq('combined: GIA gain straddles the £50,270 CGT band boundary -> CGT', r.cgt, 1379, 1)
+}
+
+// Scenario 3: CGT bands are reserved to Westminster, NOT devolved — a Scottish taxpayer's capital
+// gains are still taxed against the UK £50,270 threshold, not the Scottish income tax bands (whose
+// intermediate/higher boundary sits at £43,662). calculateCGT's `scottish` flag is intentionally
+// unused for this reason — this test pins that down so it can't be "fixed" into a real bug later.
+{
+  const cgtScottish = E.calculateCGT(30000, 10000, 40000, true)
+  const cgtRUK = E.calculateCGT(30000, 10000, 40000, false)
+  eq('combined: Scottish taxpayer CGT uses the UK £50,270 threshold', cgtScottish, 3464)
+  ok('combined: CGT is identical for Scottish vs rUK taxpayer at the same taxable income', cgtScottish === cgtRUK)
+}
+
+// Scenario 4: dividends stacking on top of pension + state pension income that's already most of
+// the way through the basic-rate band (using scenario 2's £45,250 taxable income as the base).
+// Hand-calc: £5,000 dividends -> £500 allowance -> £4,500 taxable, starting at £45,750 (income + allowance).
+// Only £4,520 of basic-rate room left before £50,270 -> all £4,500 fits at 8.75% -> £394.
+{
+  const div = E.calculateDividendTax(5000, 45250)
+  eq('combined: dividends stacking on near-exhausted basic band -> dividend tax', div, 394)
+}
+
 console.log(`\n==== ${pass} passed, ${fail} failed ====`)
 process.exit(fail === 0 ? 0 : 1)
