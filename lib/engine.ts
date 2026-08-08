@@ -577,12 +577,6 @@ export function generateProjection(
     const lifestyleSpending = calculateTargetSpending(wc, baseSpending, totalPortfolio, initialPortfolio, initialWithdrawalRate, prevSpending)
     // Track lifestyle spending for next year's floor/ceiling/guardrail continuity (add-ons excluded).
     prevSpending = lifestyleSpending
-    // Add the unavoidable extras on top, so every method honours care costs and extra spending.
-    const targetSpending = lifestyleSpending + careCost + extraSpending
-
-    // targetSpending is NET — what the household actually receives after all tax
-    // Income sources (state pension, DB pension) are GROSS — we must deduct tax on them
-    // to find how much net income they actually contribute toward the spending target
 
     // Calculate income tax on non-portfolio income per person
     const p1NonPortfolioIncome = (config.person1.receivingStatePension || age1 >= config.person1.statePensionAge
@@ -596,8 +590,32 @@ export function generateProjection(
     const incomeFromSources = statePensionTotal + totalOtherIncome
     const netIncomeFromSources = Math.max(0, incomeFromSources - p1NonPortfolioTax - p2NonPortfolioTax)
 
-    // Net amount still needed from portfolio after net income from sources
-    const netPortfolioNeeded = Math.max(0, targetSpending - netIncomeFromSources)
+    // Rate-based methods (percent of portfolio, Vanguard dynamic, Guyton-Klinger) define a
+    // withdrawal RATE against the portfolio itself — this is what "the 4% rule" and similar
+    // safe-withdrawal-rate strategies actually mean: the rate is tested for portfolio
+    // survival because the portfolio is the part exposed to market risk. Guaranteed income
+    // (state pension, a DB pension) carries no market risk, so it must NOT be blended into
+    // the rate — it sits on top as separate, additional spending, exactly like a "constant"
+    // household would receive it on top of a fixed drawdown. Only fixed-total methods
+    // (constant amount, spending phases) legitimately let income sources offset the target,
+    // since those targets represent total desired household spending, not a portfolio rate.
+    const isRateBasedMethod = wc.method === "percent" || wc.method === "vanguard_dynamic" || wc.method === "guyton_klinger"
+
+    let targetSpending: number
+    let netPortfolioNeeded: number
+    if (isRateBasedMethod) {
+      // The rate applies to the portfolio directly; income from sources is added on top
+      // afterward for reporting the household's total net income, not subtracted first.
+      netPortfolioNeeded = Math.max(0, lifestyleSpending + careCost + extraSpending)
+      targetSpending = netPortfolioNeeded + netIncomeFromSources
+    } else {
+      // targetSpending is NET — what the household actually receives after all tax.
+      // Income sources (state pension, DB pension) are GROSS — we must deduct tax on them
+      // to find how much net income they actually contribute toward the spending target.
+      targetSpending = lifestyleSpending + careCost + extraSpending
+      // Net amount still needed from portfolio after net income from sources
+      netPortfolioNeeded = Math.max(0, targetSpending - netIncomeFromSources)
+    }
 
     // Split portfolio need proportionally between partners by portfolio size
     const p1PortfolioTotal = p1Balances.cash + p1Balances.isa + p1Balances.sipp + p1Balances.general

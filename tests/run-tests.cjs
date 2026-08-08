@@ -141,5 +141,49 @@ console.log('\n# Combined scenarios (catch bugs that only show up when rules int
   eq('combined: dividends stacking on near-exhausted basic band -> dividend tax', div, 394)
 }
 
+console.log('\n# Rate-based methods (percent, Vanguard dynamic, Guyton-Klinger) apply the rate to')
+console.log('# the PORTFOLIO ONLY, with guaranteed income (state/DB pension) added on top —')
+console.log('# not blended into the rate. This matches the standard definition of a safe')
+console.log('# withdrawal rate (e.g. the 4% rule), which is calibrated against portfolio')
+console.log('# survival specifically, since only the portfolio carries market risk. Found and')
+console.log('# fixed Aug 2026 — previously a DB/state pension reduced the portfolio withdrawal,')
+console.log('# understating it by roughly the pension amount every year.')
+{
+  const cfg = (overrides) => ({
+    ...E.getDefaultConfig(),
+    person1: { ...E.getDefaultConfig().person1, age: 60, isaBalance: 550000, sippBalance: 0, generalInvestments: 0, giaCostBasis: 0, cashSavings: 0, otherIncome: [], receivingStatePension: false, statePensionAmount: 0 },
+    person2: { ...E.getDefaultConfig().person2, age: 60, isaBalance: 550000, sippBalance: 0, generalInvestments: 0, giaCostBasis: 0, cashSavings: 0, otherIncome: [{ label: 'DB Pension', annualAmount: 14500, type: 'db_pension', increasesWithInflation: true }], receivingStatePension: false, statePensionAmount: 0 },
+    annualSpending: 24000,
+    withdrawalConfig: { method: 'percent', percentOfPortfolio: 3, floorPct: 2.5, ceilingPct: 5, guardrailLower: 20, guardrailUpper: 20 },
+    spendingPhases: [],
+    ...overrides,
+  })
+
+  // £1.1m portfolio, 3% of portfolio, £14,500 DB pension (Lisa's, no state pension yet).
+  // Correct: portfolio draw is ~3% of £1.1m (~£33,000, grossed up a little for tax),
+  // completely unaffected by the pension. Net total = that draw + the pension net of tax.
+  const proj = E.generateProjection(cfg(), undefined, 0.025)
+  ok('rate-based method: portfolio withdrawal is roughly 3% of portfolio, NOT reduced by the pension',
+    Math.abs(proj[0].withdrawals - 33000) < 1500)
+  ok('rate-based method: pension is added on top, so total net income exceeds the 3% portfolio figure',
+    proj[0].netIncome > proj[0].withdrawals + 13000)
+
+  // Same portfolio and rate, but with vs without the pension — the WITHDRAWAL figure itself
+  // must be identical either way, since the pension shouldn't touch the portfolio side at all.
+  const withPension = E.generateProjection(cfg(), undefined, 0.025)
+  const noPensionCfg = cfg({ person2: { ...cfg().person2, otherIncome: [] } })
+  const withoutPension = E.generateProjection(noPensionCfg, undefined, 0.025)
+  eq('rate-based method: portfolio withdrawal is the same with or without the pension present',
+    withPension[0].withdrawals, withoutPension[0].withdrawals, 5)
+
+  // "Constant amount" is a different kind of target (a fixed total spend) and legitimately
+  // still lets the pension offset what's needed from the portfolio — that behaviour must be
+  // unchanged by this fix.
+  const constantCfg = cfg({ withdrawalConfig: { ...cfg().withdrawalConfig, method: 'constant' } })
+  const constantProj = E.generateProjection(constantCfg, undefined, 0.025)
+  ok('"constant" method (a fixed total target) still has the pension offset the portfolio need, unaffected by this fix',
+    constantProj[0].withdrawals < 24000 - 13000)
+}
+
 console.log(`\n==== ${pass} passed, ${fail} failed ====`)
 process.exit(fail === 0 ? 0 : 1)
